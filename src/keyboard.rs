@@ -29,9 +29,9 @@ impl Keyboard {
 				return '\0';
 			}
 			Ok(Key::Esc) => {
-				return "!";
+				return '!';
 			}
-			Ok(key) => {
+			Ok(_key) => {
 				return '\0';
 			}
 			Err(e) => {

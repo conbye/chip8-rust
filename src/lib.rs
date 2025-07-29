@@ -1,7 +1,10 @@
-use rand::Rng;
 use std::cmp;
-use getch_rs::{Getch, Key};
-use std::collections::HashMap;
+use std::sync::Mutex;
+
+use rand::Rng;
+use getch_rs::Key;
+// use beep::beep;
+use crate::keyboard::Keyboard;
 
 mod keyboard;
 
@@ -53,18 +56,18 @@ macro_rules! extract_val {
 	}
 }
 
-struct Emulator {
+pub struct Emulator {
 	pc: u16,
 	ram: [u8; MEM_SIZE_BYTES],
 	display: [[bool; SCREEN_WIDTH]; SCREEN_HEIGHT],
 	ir: u16,
 	font_loc: u16,
-	delay_timer: u8,
-	sound_timer: u8,
+	delay_timer: Mutex<u8>,
+	sound_timer: Mutex<u8>,
 	r: [u8; NUM_REGISTERS],
 	stack: Vec<u16>,
 	stack_limit: usize,
-	keyboard: keyboard::Keyboard,
+	keyboard: Keyboard,
 }
 
 impl Emulator {
@@ -75,25 +78,34 @@ impl Emulator {
 			display: [[false; SCREEN_WIDTH]; SCREEN_HEIGHT],
 			ir: INIT_IR,
 			font_loc: DEAFULT_FONT_LOC,
-			delay_timer: INIT_DELAY,
-			sound_timer: INIT_SOUND,
+			delay_timer: Mutex::new(INIT_DELAY),
+			sound_timer: Mutex::new(INIT_SOUND),
 			r: [0; NUM_REGISTERS],
 			stack: Vec::new(),
 			stack_limit: INIT_LIMIT,
-			keyboard: keyboard::Keyboard::init(Key::Esc),
+			keyboard: Keyboard::init(Key::Esc),
 		}
 	}
 
-	pub fn update_timer(&mut self) -> (bool, bool) {
-		let delay_done = self.delay_timer <= 0;
-		if !delay_done {
-			self.delay_timer -= 1;
+	pub fn load_font(& mut self, font_data: &Vec<u8>) {
+		let start_i = self.font_loc as usize;
+		for i in 0..font_data.len() {
+			self.ram[start_i + i] = font_data[i];
 		}
-		let sound_done = self.sound_timer <= 0;
-		if !sound_done {
-			self.sound_timer -= 1;
+	}
+
+	pub fn update_timer(&mut self) {
+		let mut atomic_delay_timer = self.delay_timer.lock().unwrap();
+		let mut atomic_sound_timer = self.sound_timer.lock().unwrap();
+
+		if *atomic_delay_timer > 0 {
+			*atomic_delay_timer -= 1;
 		}
-		(delay_done, sound_done)
+
+		if *atomic_sound_timer > 0 {
+			*atomic_sound_timer -= 1;
+			// println!('\x07');
+		}
 	}
 
 	pub fn fetch(&mut self) -> u16 {
@@ -136,13 +148,13 @@ impl Emulator {
 			}
 			0x5 => {
 				let x = extract_nibble!(instr, 2) as usize;
-				let val = extract_val!(instr, 0);
-				self.skip_cond_n(true, x, val);
+				let y = extract_val!(instr, 1) as usize;
+				self.skip_cond_r(true, x, y);
 			}
 			0x9 => {
 				let x = extract_nibble!(instr, 2) as usize;
-				let val = extract_val!(instr, 0);
-				self.skip_cond_n(false, x, val);
+				let y = extract_val!(instr, 1) as usize;
+				self.skip_cond_r(false, x, y);
 			}
 			0x6 => {
 				let x = extract_nibble!(instr, 2) as usize;
@@ -207,9 +219,9 @@ impl Emulator {
 				match end_key {
 
 					// Timers
-					0x07 => { self.get_delay(x); }
-					0x15 => { self.set_delay(x); }
-					0x18 => { self.set_sound(x); }
+					0x07 => { self.get_delay_timer(x); }
+					0x15 => { self.set_delay_timer(x); }
+					0x18 => { self.set_sound_timer(x); }
 
 					// Add to index
 					0x1E => { self.add_to_idx(x); }
@@ -231,9 +243,9 @@ impl Emulator {
 
 	// 0x0
 	fn clear_screen(&mut self) {
-		for row in self.display {
-			for mut pixel in row { 
-				pixel = false; 
+		for row in self.display.iter_mut() {
+			for pixel in row { 
+				*pixel = false; 
 			}
 		}
 	}
@@ -347,7 +359,7 @@ impl Emulator {
 	// 0xC
 	fn rand(&mut self, x: usize, mask: u8) {
 		let mut rng = rand::thread_rng();
-		let mut num = rng.gen_range(0..=255);
+		let num = rng.gen_range(0..=255);
 		self.r[x] = mask & (num as u8);
 	}
 	
@@ -396,16 +408,19 @@ impl Emulator {
 	}
 
 	// 0xF
-	fn get_delay(&mut self, x: usize) {
-		self.r[x] = self.delay_timer;
+	fn get_delay_timer(&mut self, x: usize) {
+		let atomic_delay_timer = self.delay_timer.lock().unwrap();
+		self.r[x] = *atomic_delay_timer;
 	}
 
-	fn set_delay(&mut self, x: usize) {
-		self.delay_timer = self.r[x];
+	fn set_delay_timer(&mut self, x: usize) {
+		let mut atomic_delay_timer = self.delay_timer.lock().unwrap();
+		*atomic_delay_timer = self.r[x];
 	}
 
-	fn set_sound(&mut self, x: usize) {
-		self.sound_timer = self.r[x];
+	fn set_sound_timer(&mut self, x: usize) {
+		let mut atomic_sound_timer = self.delay_timer.lock().unwrap();
+		*atomic_sound_timer = self.r[x];
 	}
 
 	fn add_to_idx(&mut self, x: usize) {
@@ -425,8 +440,11 @@ impl Emulator {
 
 	fn font_char(&mut self, x: usize) {
 		let font_addr = self.font_loc as u16;
-		let char_offset = self.r[x] as u16;
-		self.pc = font_addr + char_offset;
+		let chr_code = self.r[x] as u16;
+		if chr_code >= 'A' as u16 {
+			let chr_code = chr_code - 0x7;
+		}
+		self.pc = font_addr + chr_code;
 	}
 
 	fn dec_conversion(&mut self, x: usize) {

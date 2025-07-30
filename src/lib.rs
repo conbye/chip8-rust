@@ -1,5 +1,8 @@
 use std::cmp;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+use std::sync::mpsc;
 
 use rand::Rng;
 use getch_rs::Key;
@@ -62,8 +65,8 @@ pub struct Emulator {
 	display: [[bool; SCREEN_WIDTH]; SCREEN_HEIGHT],
 	ir: u16,
 	font_loc: u16,
-	delay_timer: Mutex<u8>,
-	sound_timer: Mutex<u8>,
+	delay_timer: Arc<Mutex<u8>>,
+	sound_timer: Arc<Mutex<u8>>,
 	r: [u8; NUM_REGISTERS],
 	stack: Vec<u16>,
 	stack_limit: usize,
@@ -78,8 +81,8 @@ impl Emulator {
 			display: [[false; SCREEN_WIDTH]; SCREEN_HEIGHT],
 			ir: INIT_IR,
 			font_loc: DEAFULT_FONT_LOC,
-			delay_timer: Mutex::new(INIT_DELAY),
-			sound_timer: Mutex::new(INIT_SOUND),
+			delay_timer: Arc::new(Mutex::new(INIT_DELAY)),
+			sound_timer: Arc::new(Mutex::new(INIT_SOUND)),
 			r: [0; NUM_REGISTERS],
 			stack: Vec::new(),
 			stack_limit: INIT_LIMIT,
@@ -108,13 +111,22 @@ impl Emulator {
 		}
 	}
 
-	pub fn fetch(&mut self) -> u16 {
+	pub fn extract_timers(&mut self) -> (Arc<Mutex<u8>>, Arc<Mutex<u8>>) {
+		(self.delay_timer.clone(), self.sound_timer.clone())
+	}
+
+	pub fn run_next_instr(&mut self) {
+		let instr = self.fetch();
+		self.decode_and_execute(instr);
+	}
+
+	fn fetch(&mut self) -> u16 {
 		let pc_addr = self.pc as usize;
 		self.pc += 1;
 		((self.ram[pc_addr] as u16) << BYTE_SIZE) | (self.ram[pc_addr + 1] as u16)
 	}
 
-	pub fn decode_and_execute(&mut self, instr: u16) {
+	fn decode_and_execute(&mut self, instr: u16) {
 		let start_key = extract_nibble!(instr, 3);
 
 		match start_key {

@@ -1,12 +1,8 @@
 use std::cmp;
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
-use std::sync::mpsc;
 
 use rand::Rng;
 use getch_rs::Key;
-// use beep::beep;
 use crate::keyboard::Keyboard;
 
 mod keyboard;
@@ -97,22 +93,12 @@ impl Emulator {
 		}
 	}
 
-	pub fn update_timer(&mut self) {
-		let mut atomic_delay_timer = self.delay_timer.lock().unwrap();
-		let mut atomic_sound_timer = self.sound_timer.lock().unwrap();
-
-		if *atomic_delay_timer > 0 {
-			*atomic_delay_timer -= 1;
-		}
-
-		if *atomic_sound_timer > 0 {
-			*atomic_sound_timer -= 1;
-			// println!('\x07');
-		}
-	}
-
 	pub fn extract_timers(&mut self) -> (Arc<Mutex<u8>>, Arc<Mutex<u8>>) {
 		(self.delay_timer.clone(), self.sound_timer.clone())
+	}
+
+	pub fn get_display(&self) -> &[[bool; SCREEN_WIDTH]; SCREEN_HEIGHT] {
+		&self.display
 	}
 
 	pub fn run_next_instr(&mut self) {
@@ -452,9 +438,9 @@ impl Emulator {
 
 	fn font_char(&mut self, x: usize) {
 		let font_addr = self.font_loc as u16;
-		let chr_code = self.r[x] as u16;
+		let mut chr_code = self.r[x] as u16;
 		if chr_code >= 'A' as u16 {
-			let chr_code = chr_code - 0x7;
+			chr_code = chr_code - 0x7;
 		}
 		self.pc = font_addr + chr_code;
 	}

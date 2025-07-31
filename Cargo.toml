@@ -1,8 +1,11 @@
 [package]
-	name = "chip8-rust"
+	name = "chip8_rust"
 	version = "0.1.0"
+	authors = ["Connor Byerman <conbyerman@gmail.com>"]
 	edition = "2024"
+	repository = "https://github.com/conbye/chip8-rust"
 
 [dependencies]
-	rand = "0.8"
-	ncurses = "6.0.1"
+    sdl3 = "0.14.36"
+	rand = "0.9.2"
+	getch-rs = "0.2.0"

@@ -7,3 +7,4 @@ Connor Byerman
 
 ## Sources:
 https://tobiasvl.github.io/blog/write-a-chip-8-emulator/
+https://github.com/Rust-SDL2/rust-sdl2

@@ -1,56 +1,55 @@
 // Standard Libraries
 use std::io;
 use std::fs;
-use std::time::{Duration, Instant};
-use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use std::sync::mpsc;
 use std::thread;
 
 // Special libraries needed for this project
 use chip8_rust::*;
-use sdl2::event::Event;
+
+mod window;
 
 const FONT_PATH: &str = "./chip48font.txt";
 const FONT_HEIGHT: usize = 5;
 const KEYBOARD_SIZE: usize = 16;
 const DEFAULT_HZ: u64 = 60;
+const INT_ASCII: u8 = 0x50;
 
 
 const SCREEN_WIDTH: usize = 64;
 const SCREEN_HEIGHT: usize = 32;
 const SCALE: u32 = 15;
-const WINDOW_WIDTH: u32 = (SCREEN_WIDTH as u32) * SCALE;
-const WINDOW_HEIGHT: u32 = (SCREEN_HEIGHT as u32) * SCALE;
+
 
 fn main() {
-
-	let sdl_context = sdl2::init().unwrap();
-    let video_subsystem = sdl_context.video().unwrap();
-
-    let window = video_subsystem.window("CHIP-8 Emulator (Rust)", WINDOW_WIDTH, WINDOW_HEIGHT)
-        .position_centered()
-        .build()
-        .unwrap();
-
-	let mut canvas = window.into_canvas().present_vsync().build().unwrap();
-    canvas.clear();
-    canvas.present();
-
 
 	println!("Initializing emulator...");
 	let mut emu = Emulator::init();
 
 	println!("Enter Location of Font to Load (Default if not given): ");
-	let mut path = String::from(FONT_PATH);
+	let mut path = String::new();
 	io::stdin().read_line(&mut path)
 		.expect("failed to read line");
-	
-	let font: Vec<u8> = parse_font(path.as_str());
+
+	let font: Vec<u8>;
+	if path.trim().is_empty()  {
+		font = parse_font(FONT_PATH);
+	} else  {
+		font = parse_font(path.as_str());
+	}
 	emu.load_font(&font);
 
 	println!("Initializing timer...");
 	let tick_length = Duration::from_millis(1000 / DEFAULT_HZ);
 
+	let mut sdl_handler = window::SdlHandler::init(SCREEN_WIDTH, SCREEN_HEIGHT, SCALE);
+
+	sdl_handler.display_buff(&emu);
+
 	thread::scope(|s| {
+
+		let (tx, rx) = mpsc::channel();
 
 		let (d_timer, s_timer) = emu.extract_timers();
 		let handler = s.spawn(move || loop {
@@ -66,10 +65,19 @@ fn main() {
 				*atomic_sound_timer -= 1;
 				// println!('\x07');
 			}
+			let exit = rx.recv().unwrap();
+			if exit { break; }
 		});
-		loop {
-			emu.run_next_instr();
+		'comp_and_display: loop {
+			// Poll events and check for an exit command
+			let exit = sdl_handler.poll_events(&mut emu);
+
+			sdl_handler.display_buff(&emu);
+
+			tx.send(exit).unwrap();
+			if exit { break 'comp_and_display; }
 		}
+		handler.join();
 	});
 }
 
@@ -78,8 +86,8 @@ fn parse_font(font_path: &str) -> Vec<u8> {
 	let mut font: Vec<u8> = Vec::new();
 	font.reserve(KEYBOARD_SIZE * FONT_HEIGHT);
 
-	let font_str = fs::read_to_string(FONT_PATH)
-		.expect("Can't find our font at path: {font_path}!");
+	let font_str = fs::read_to_string(font_path)
+		.expect("Can't find our font at path!");
 
 	let font_lines = font_str.lines();
 	
@@ -88,17 +96,9 @@ fn parse_font(font_path: &str) -> Vec<u8> {
 		if i % (FONT_HEIGHT + 1) == 0 {
 			continue;
 		}
-		let mut byte: u8 = 0;
 		let line_str: String = String::from(line);
-		for (place, chr) in line_str.chars().enumerate() {
-			let bit = chr as u8;
-			byte &= bit << place;
-		}
+		let byte: u8 = isize::from_str_radix(&line_str[2..], 2).unwrap() as u8;
 		font.push(byte);
 	}
 	font
-}
-
-fn draw_screen(emu: &mut Emulator) {
-
 }

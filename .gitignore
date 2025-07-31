@@ -1,2 +1,4 @@
 target/
 .vs/
+src/instr.rs
+src/interrupts.rs

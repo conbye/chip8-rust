@@ -8,4 +8,3 @@
 [dependencies]
     sdl3 = "0.14.36"
 	rand = "0.9.2"
-	getch-rs = "0.2.0"

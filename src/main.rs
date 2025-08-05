@@ -15,7 +15,8 @@ const FONT_PATH: &str = "./chip48font.txt";
 const ROM_PATH: &str = "./test_games/c8games/";
 const FONT_HEIGHT: usize = 5;
 const KEYBOARD_SIZE: usize = 16;
-const DEFAULT_HZ: u64 = 60;
+const DEFAULT_TIMER_HZ: u64 = 60;
+const INSTRUCTIONS_PER_SEC: u64 = 700;
 
 const FONT_ADDRESS: usize = 0x0050;
 const ROM_START_ADDRESS: usize = 0x0200;
@@ -50,7 +51,8 @@ fn main() {
 	load_rom(rom_path.trim(), &mut emu);
 
 	println!("Initializing timer...");
-	let tick_length = Duration::from_millis(1000 / DEFAULT_HZ);
+	let tick_length = Duration::from_millis(1000 / DEFAULT_TIMER_HZ);
+	let till_next_instr = Duration::from_millis(1000 / INSTRUCTIONS_PER_SEC);
 
 	let mut sdl_handler = window::SdlHandler::init(SCREEN_WIDTH, SCREEN_HEIGHT, SCALE);
 
@@ -72,7 +74,7 @@ fn main() {
 
 			if *atomic_sound_timer > 0 {
 				*atomic_sound_timer -= 1;
-				// println!('\x07');
+				print!("{}", '\x07');
 			}
 			let exit = rx.recv().unwrap();
 			if exit { break 'timer; }
@@ -85,6 +87,7 @@ fn main() {
 
 			tx.send(exit).unwrap();
 			if exit { break 'comp_and_display; }
+			thread::sleep(till_next_instr);
 		}
 	});
 }

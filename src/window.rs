@@ -5,6 +5,7 @@ extern crate sdl3;
 
 use sdl3::pixels::Color;
 use sdl3::event::Event;
+use sdl3::keyboard::Keycode;
 use sdl3::rect::Rect;
 use sdl3::render::WindowCanvas;
 use sdl3::Sdl;
@@ -43,7 +44,7 @@ impl SdlHandler {
         let mut event_pump = self.context.event_pump().unwrap();
         for event in event_pump.poll_iter() {
             match event {
-                Event::Quit {..} => { return true; },
+                Event::Quit {..} | Event::KeyDown {keycode: Some(Keycode::Escape), ..} => { return true; }
                 Event::KeyDown{keycode, ..} => {
                     let key = keycode.unwrap();
                     emu.update_keystroke(&key);
@@ -51,7 +52,7 @@ impl SdlHandler {
                 _ => {}
             }
         }
-        dbg!(&emu);
+        // dbg!(&emu);
         emu.run_next_instr();
         false
     }

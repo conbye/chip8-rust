@@ -12,6 +12,7 @@ const BYTE_SIZE: usize = 8;
 
 const MEM_SIZE_BYTES: usize = 512 * BYTE_SIZE;
 const MAX_BYTE: u16 = 0xFF;
+const FONT_HEIGHT: u16 = 5;
 
 const SCREEN_WIDTH: usize = 64;
 const SCREEN_HEIGHT: usize = 32;
@@ -21,8 +22,8 @@ const VF_IDX: usize = 15;
 
 
 const INIT_PC: u16 = 0;
-const INIT_IR: u16 = 0x0000;
 const INIT_FONT_ADDRESS: u16 = 0x0050;
+const INIT_IR: u16 = INIT_FONT_ADDRESS;
 const INIT_DELAY: u8 = 60;
 const INIT_SOUND: u8 = 60;
 const INIT_LIMIT: usize = 16;
@@ -75,12 +76,11 @@ pub struct Emulator {
 impl fmt::Debug for Emulator {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "Chip8 Emulator State -> \n\
-			PC: 0x{:X}\n\
-			INSTRUCTION: 0x{:X}\n\
+			PC: 0x{:04X} | IR: 0x{:04X} | STACK DEPTH: {} | INSTRUCTION: 0x{:04X}\n\
 			REGISTERS: \n\
-				V0: {}, V1: {}, V2: {}, V3: {}, V4: {}, V5: {}, V6: {}, V7: {}, \n\
-				V8: {}, V9: {}, VA: {}, VB: {}, VC: {}, VD: {}, VE: {}, VF: {}",
-		self.pc,
+				V0: {:02X}, V1: {:02X}, V2: {:02X}, V3: {:02X}, V4: {:02X}, V5: {:02X}, V6: {:02X}, V7: {:02X}, \n\
+				V8: {:02X}, V9: {:02X}, VA: {:02X}, VB: {:02X}, VC: {:02X}, VD: {:02X}, VE: {:02X}, VF: {:02X}",
+		self.pc, self.ir, self.stack.len(),
 	   {
 		   let pc_addr = self.pc as usize;
 		   ((self.ram[pc_addr] as u16) << BYTE_SIZE) | (self.ram[pc_addr + 1] as u16)
@@ -178,12 +178,12 @@ impl Emulator {
 			}
 			0x5 => {
 				let x = extract_nibble!(instr, 2) as usize;
-				let y = extract_val!(instr, 1) as usize;
+				let y = extract_nibble!(instr, 1) as usize;
 				self.skip_cond_r(true, x, y);
 			}
 			0x9 => {
 				let x = extract_nibble!(instr, 2) as usize;
-				let y = extract_val!(instr, 1) as usize;
+				let y = extract_nibble!(instr, 1) as usize;
 				self.skip_cond_r(false, x, y);
 			}
 			0x6 => {
@@ -315,7 +315,7 @@ impl Emulator {
 	fn skip_cond_r(&mut self, eq: bool, x: usize, y: usize) {
 		let cond = if eq { self.r[x] == self.r[y] } else { self.r[x] != self.r[y] };
 
-		if cond {self.pc += 2; }
+		if cond { self.pc += 2; }
 	}
 
 	// 0x6
@@ -402,6 +402,7 @@ impl Emulator {
 		// Access needed portion of sprite in memory
 		let idx = self.ir as usize;
 		let sprite = &self.ram[idx..idx + sprite_height];
+		self.r[VF_IDX] = 0x0;
 
 		// Update display according to sprite bits
 		for i in (0..sprite_height) {
@@ -420,15 +421,13 @@ impl Emulator {
 
 	// 0xE
 	fn skip_if_key(&mut self, x: usize, pressed: bool) {
-		let chr = self.r[x] as char;
+		let chr = self.r[x];
 
 		let keystroke = self.keyboard.get_cur_key();
 
 		let skip = if pressed {keystroke == chr} else {keystroke != chr};
 
-		if skip {
-			self.pc += 2;
-		}
+		if skip { self.pc += 2; }
 	}
 
 	// 0xF
@@ -448,28 +447,24 @@ impl Emulator {
 	}
 
 	fn add_to_idx(&mut self, x: usize) {
-		self.ir = self.r[x] as u16;
+		self.ir += self.r[x] as u16;
 	}
 
 	fn get_key(&mut self, x: usize) {
 
 		let keystroke = self.keyboard.get_cur_key();
 		
-		if keystroke == '\0' {
+		if keystroke == 0x0 {
 			self.pc -= 2;
 		} else {
-			self.r[x] = keystroke as u8;
+			self.r[x] = keystroke;
 		}
 	}
 
 	fn font_char(&mut self, x: usize) {
-		println!("using font char");
 		let font_addr = self.font_loc;
-		let mut chr_code = self.r[x] as u16;
-		if chr_code >= 'A' as u16 {
-			chr_code = chr_code - 0x7;
-		}
-		self.ir = font_addr + chr_code;
+		let chr_code = self.r[x] as u16;
+		self.ir = font_addr + chr_code * FONT_HEIGHT;
 	}
 
 	fn dec_conversion(&mut self, x: usize) {

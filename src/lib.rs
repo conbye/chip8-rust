@@ -1,8 +1,9 @@
 use std::cmp;
 use std::sync::{Arc, Mutex};
+use::std::fmt;
 
 use rand::Rng;
-use getch_rs::Key;
+use sdl3::keyboard::Keycode;
 use crate::keyboard::Keyboard;
 
 mod keyboard;
@@ -10,6 +11,7 @@ mod keyboard;
 const BYTE_SIZE: usize = 8;
 
 const MEM_SIZE_BYTES: usize = 512 * BYTE_SIZE;
+const MAX_BYTE: u16 = 0xFF;
 
 const SCREEN_WIDTH: usize = 64;
 const SCREEN_HEIGHT: usize = 32;
@@ -17,10 +19,10 @@ const SCREEN_HEIGHT: usize = 32;
 const NUM_REGISTERS: usize = 16;
 const VF_IDX: usize = 15;
 
-const DEAFULT_FONT_LOC: u16 = 0x050;
 
 const INIT_PC: u16 = 0;
 const INIT_IR: u16 = 0x0000;
+const INIT_FONT_ADDRESS: u16 = 0x0050;
 const INIT_DELAY: u8 = 60;
 const INIT_SOUND: u8 = 60;
 const INIT_LIMIT: usize = 16;
@@ -55,6 +57,7 @@ macro_rules! extract_val {
 	}
 }
 
+
 pub struct Emulator {
 	pc: u16,
 	ram: [u8; MEM_SIZE_BYTES],
@@ -69,6 +72,24 @@ pub struct Emulator {
 	keyboard: Keyboard,
 }
 
+impl fmt::Debug for Emulator {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "Chip8 Emulator State -> \n\
+			PC: 0x{:X}\n\
+			INSTRUCTION: 0x{:X}\n\
+			REGISTERS: \n\
+				V0: {}, V1: {}, V2: {}, V3: {}, V4: {}, V5: {}, V6: {}, V7: {}, \n\
+				V8: {}, V9: {}, VA: {}, VB: {}, VC: {}, VD: {}, VE: {}, VF: {}",
+		self.pc,
+	   {
+		   let pc_addr = self.pc as usize;
+		   ((self.ram[pc_addr] as u16) << BYTE_SIZE) | (self.ram[pc_addr + 1] as u16)
+	   },
+		self.r[0], self.r[1], self.r[2], self.r[3], self.r[4], self.r[5], self.r[6], self.r[7],
+	    self.r[8], self.r[9], self.r[10], self.r[11], self.r[12], self.r[13], self.r[14], self.r[15])
+	}
+}
+
 impl Emulator {
 	pub fn init() -> Self {
 		Self {
@@ -76,25 +97,35 @@ impl Emulator {
 			ram: [0; MEM_SIZE_BYTES],
 			display: [[false; SCREEN_WIDTH]; SCREEN_HEIGHT],
 			ir: INIT_IR,
-			font_loc: DEAFULT_FONT_LOC,
+			font_loc: INIT_FONT_ADDRESS,
 			delay_timer: Arc::new(Mutex::new(INIT_DELAY)),
 			sound_timer: Arc::new(Mutex::new(INIT_SOUND)),
 			r: [0; NUM_REGISTERS],
 			stack: Vec::new(),
 			stack_limit: INIT_LIMIT,
-			keyboard: Keyboard::init(Key::Esc),
+			keyboard: Keyboard::init(Keycode::Escape),
+		}
+	}
+	pub fn print_registers(&self) {
+		println!("REGISTERS:");
+		for i in 0..NUM_REGISTERS {
+			println!("   V{}: 0x{:X}", i, self.r[i]);
 		}
 	}
 
-	pub fn load_font(& mut self, font_data: &Vec<u8>) {
-		let start_i = self.font_loc as usize;
-		for i in 0..font_data.len() {
-			self.ram[start_i + i] = font_data[i];
+	pub fn load_extern_data(& mut self, data: &Vec<u8>, addr: usize, is_rom: bool) {
+		for i in 0..data.len() {
+			self.ram[addr + i] = data[i];
 		}
+		if is_rom { self.pc = addr as u16; }
 	}
 
 	pub fn extract_timers(&mut self) -> (Arc<Mutex<u8>>, Arc<Mutex<u8>>) {
 		(self.delay_timer.clone(), self.sound_timer.clone())
+	}
+
+	pub fn update_keystroke(&mut self, key: &Keycode) {
+		self.keyboard.interpret_keystroke(key);
 	}
 
 	pub fn get_display(&self) -> &[[bool; SCREEN_WIDTH]; SCREEN_HEIGHT] {
@@ -108,7 +139,7 @@ impl Emulator {
 
 	fn fetch(&mut self) -> u16 {
 		let pc_addr = self.pc as usize;
-		self.pc += 1;
+		self.pc += 2;
 		((self.ram[pc_addr] as u16) << BYTE_SIZE) | (self.ram[pc_addr + 1] as u16)
 	}
 
@@ -119,11 +150,12 @@ impl Emulator {
 			0x0 => {
 				let val = extract_val!(instr, 0);
 				if val == 0xEE {
-					self.end_subroutiune();
+					self.end_subroutine();
 				} else if val == 0xE0 {
 					self.clear_screen();
 				} else {
-					panic!("Invalid Command! {instr}");
+					self.print_registers();
+;					panic!("Invalid Command! 0x{:X}", instr);
 				}
 			}
 			0x1 => {
@@ -177,13 +209,16 @@ impl Emulator {
 
 					0x4 => { self.arith_add(x, y); }
 
-					0x5 => { self.arith_sub_a(x, y); }
-					0x7 => { self. arith_sub_b(x, y); }
+					0x5 => { self.arith_sub(x, y); }
+					0x7 => { self. arith_sub(y, x); }
 
 					0x6 => { self.arith_shift_r(x, y); }
 					0xE => { self.arith_shift_l(x, y); }
 
-					_ => { panic!("Invalid Arithmetic Instruction."); }
+					_ => {
+						self.print_registers();
+						panic!("Invalid Arithmetic Instruction.");
+					}
 				}
 			}
 			0xA => {
@@ -235,7 +270,7 @@ impl Emulator {
 					y => { panic!("Invalid other key: {y}"); }
 				}
 			}
-			k => { panic!("Invalid Start Key {k}"); }
+			k => { panic!("Invalid Start Key {k} for instruction 0x{:X}", instr); }
 		}
 	}
 
@@ -256,13 +291,13 @@ impl Emulator {
 	// 0x2
 	fn init_subroutine(&mut self, addr: u16) {
 		self.stack.push(self.pc);
-		self.pc = addr;
+		self.jump(addr);
 	}
 	
-	fn end_subroutiune(&mut self) {
+	fn end_subroutine(&mut self) {
 		let last_addr = self.stack.pop();
 		if last_addr != None {
-			self.pc = last_addr.unwrap();
+			self.jump(last_addr.unwrap());
 		} else {
 			panic!("ERROR: Returned from subroutine to empty stack");
 		}
@@ -270,21 +305,17 @@ impl Emulator {
 
 	// 0x4
 	fn skip_cond_n(&mut self, eq: bool, x: usize, val: u8) {
-		if eq && (self.r[x] == val) {
-			self.pc += 2;
-		} else if !eq && (self.r[x] != val) {
-			self.pc += 2;
-		}
+		let cond = if eq { self.r[x] == val } else { self.r[x] != val };
+
+		if cond {self.pc += 2; }
 
 	}
 
 	// 0x5
 	fn skip_cond_r(&mut self, eq: bool, x: usize, y: usize) {
-		if eq && (self.r[x] == self.r[y]) {
-			self.pc += 2;
-		} else if !eq && (self.r[x] != self.r[y]) {
-			self.pc += 2;
-		}
+		let cond = if eq { self.r[x] == self.r[y] } else { self.r[x] != self.r[y] };
+
+		if cond {self.pc += 2; }
 	}
 
 	// 0x6
@@ -294,7 +325,8 @@ impl Emulator {
 
 	// 0x7
 	fn add(&mut self, x: usize, val: u8) {
-		self.r[x] += val;
+		let sum = self.r[x] as u16 + val as u16;
+		self.r[x] = (sum & MAX_BYTE) as u8;
 	}
 
 	// 0x8
@@ -315,32 +347,28 @@ impl Emulator {
 	}
 
 	fn arith_add(&mut self, x: usize, y: usize) {
-		self.r[x] = self.r[x] + self.r[y];
+		let sum: u16 = self.r[x] as u16 + self.r[y] as u16;
+		self.r[VF_IDX] = if sum > MAX_BYTE {1} else {0};
+		self.r[x] = (sum & MAX_BYTE) as u8;
 	}
 
-	fn arith_sub_a(&mut self, x: usize, y: usize) {
-		self.r[x] = self.r[x] - self.r[y];
-	}
-
-	fn arith_sub_b(&mut self, x: usize, y: usize) {
-		self.r[x] = self.r[y] - self.r[x];
+	fn arith_sub(&mut self, x: usize, y: usize) {
+		if self.r[x] < self.r[y] {
+			self.r[x] = self.r[y] - self.r[x];
+			self.r[VF_IDX] = 0;
+		} else {
+			self.r[x] = self.r[x] - self.r[y];
+			self.r[VF_IDX] = 1;
+		}
 	}
 
 	fn arith_shift_r(&mut self, x: usize, y: usize) {
-		if (self.r[x]) & 0x01 > 0 {
-			self.r[VF_IDX] = 0x01;
-		} else {
-			self.r[VF_IDX] = 0x00;
-		}
+		self.r[VF_IDX] = if (self.r[x]) & 0x01 > 0 {1} else {0};
 		self.r[x] = self.r[x] >> 0x1;
 	}
 
 	fn arith_shift_l(&mut self, x: usize, y: usize) {
-		if (self.r[x]) & 0x80 > 0 {
-			self.r[VF_IDX] = 0x01;
-		} else {
-			self.r[VF_IDX] = 0x00;
-		}
+		self.r[VF_IDX] = if (self.r[x]) & 0x80 > 0 {1} else {0};
 		self.r[x] = self.r[x] << 0x1;
 	}
 
@@ -356,8 +384,8 @@ impl Emulator {
 
 	// 0xC
 	fn rand(&mut self, x: usize, mask: u8) {
-		let mut rng = rand::thread_rng();
-		let num = rng.gen_range(0..=255);
+		let mut rng = rand::rng();
+		let num = rng.random_range(0..=(MAX_BYTE as i32));
 		self.r[x] = mask & (num as u8);
 	}
 	
@@ -366,23 +394,25 @@ impl Emulator {
 
 		// Calculate sprite size and placement
 		let sprite_height = sprite_height as usize;
-		let x_coord = (self.r[x] % 64) as usize;
-		let y_coord = (self.r[y] % 32) as usize;
-		let sprite_height = cmp::min(sprite_height, 32 - (y_coord + sprite_height)) as usize;
-		let sprite_len = cmp::min(BYTE_SIZE, 64 - x_coord) as usize;
+		let x_coord = (self.r[x] % SCREEN_WIDTH as u8) as usize;
+		let y_coord = (self.r[y] % SCREEN_HEIGHT as u8) as usize;
+		let sprite_height = cmp::min(sprite_height, SCREEN_HEIGHT - y_coord);
+		let sprite_len = cmp::min(BYTE_SIZE, SCREEN_WIDTH - x_coord);
 
 		// Access needed portion of sprite in memory
 		let idx = self.ir as usize;
 		let sprite = &self.ram[idx..idx + sprite_height];
 
 		// Update display according to sprite bits
-		for (i, row) in sprite.iter().enumerate() {
+		for i in (0..sprite_height) {
+			let row = sprite[i];
+			let x_end = x_coord + sprite_len - 1;
 			for bit in (0..sprite_len).rev() {
 				if ((row >> bit) & 0x1) != 0 {
-					self.display[x_coord + sprite_len - bit][y_coord + i] = !self.display[x_coord + bit][y_coord + i];
-				}
-				if !self.display[x_coord + bit][y_coord + i] {
-					self.r[VF_IDX] = 0x1;
+					self.display[y_coord + i][x_end - bit] = !self.display[y_coord + i][x_end - bit];
+					if !self.display[y_coord + i][x_end - bit] {
+						self.r[VF_IDX] = 0x1;
+					}
 				}
 			}
 		}
@@ -392,13 +422,9 @@ impl Emulator {
 	fn skip_if_key(&mut self, x: usize, pressed: bool) {
 		let chr = self.r[x] as char;
 
-		let keystroke = self.keyboard.interpret_keystroke();
+		let keystroke = self.keyboard.get_cur_key();
 
-		let mut skip = keystroke == chr;
-
-		if !pressed {
-			skip = !skip;
-		}
+		let skip = if pressed {keystroke == chr} else {keystroke != chr};
 
 		if skip {
 			self.pc += 2;
@@ -427,7 +453,7 @@ impl Emulator {
 
 	fn get_key(&mut self, x: usize) {
 
-		let keystroke = self.keyboard.interpret_keystroke();
+		let keystroke = self.keyboard.get_cur_key();
 		
 		if keystroke == '\0' {
 			self.pc -= 2;
@@ -437,12 +463,13 @@ impl Emulator {
 	}
 
 	fn font_char(&mut self, x: usize) {
-		let font_addr = self.font_loc as u16;
+		println!("using font char");
+		let font_addr = self.font_loc;
 		let mut chr_code = self.r[x] as u16;
 		if chr_code >= 'A' as u16 {
 			chr_code = chr_code - 0x7;
 		}
-		self.pc = font_addr + chr_code;
+		self.ir = font_addr + chr_code;
 	}
 
 	fn dec_conversion(&mut self, x: usize) {
@@ -456,14 +483,14 @@ impl Emulator {
 
 	fn store(&mut self, x: usize) {
 		let ir = self.ir as usize;
-		for xi in 0..(x + 1) {
+		for xi in 0..=x {
 			self.ram[ir + xi] = self.r[xi];
 		}
 	}
 
 	fn load(&mut self, x: usize) {
 		let ir = self.ir as usize;
-		for xi in 0..(x + 1) {
+		for xi in 0..=x {
 			self.r[xi] = self.ram[ir + xi];
 		}
 	}

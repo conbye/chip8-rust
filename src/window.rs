@@ -5,14 +5,11 @@ extern crate sdl3;
 
 use sdl3::pixels::Color;
 use sdl3::event::Event;
-use sdl3::keyboard::Keycode;
 use sdl3::rect::Rect;
 use sdl3::render::WindowCanvas;
-use sdl3::{EventPump, Sdl};
+use sdl3::Sdl;
 
 pub struct SdlHandler {
-    screen_width: u32,
-    screen_height: u32,
     scale: u32,
     context: Sdl,
     canvas: WindowCanvas,
@@ -36,29 +33,26 @@ impl SdlHandler {
         canvas.present();
 
         Self {
-            screen_width: width,
-            screen_height: height,
             scale: s,
             context: sdl_context,
             canvas,
         }
     }
 
-    pub fn get_event_pump(&mut self) -> EventPump {
-        self.context.event_pump().unwrap()
-    }
-
     pub fn poll_events(&mut self, emu: &mut Emulator) -> bool {
         let mut event_pump = self.context.event_pump().unwrap();
         for event in event_pump.poll_iter() {
             match event {
-                Event::Quit {..} |
-                Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
-                    return true;
+                Event::Quit {..} => { return true; },
+                Event::KeyDown{keycode, ..} => {
+                    let key = keycode.unwrap();
+                    emu.update_keystroke(&key);
                 },
-                _ => {emu.run_next_instr()}
+                _ => {}
             }
         }
+        dbg!(&emu);
+        emu.run_next_instr();
         false
     }
 

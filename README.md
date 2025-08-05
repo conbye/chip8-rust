@@ -14,6 +14,7 @@ This is a simple Chip 8 Emulator created in rust. It utilized multithreading to
 split the emulators in to two distinct processes defined by emulator functions:
 `run_next_instr()` and `extract_timers()`. The former runs through a single 
 instruction provided by the rom file, altering the Emulator struct as needed.
+
 The latter simply extracts the references to the two timers stored in the object
 (both of type `Arc<Mutex>`) so that they can be decremented in the parallel thread.
 Said thread is scoped to avoid the timers' parent object being destroyed during.
@@ -53,12 +54,16 @@ open.
 
 ## Some Games You can Play:
 
-- PUZZLE
-- BLITZ
-- BRIX
-- PONG
-- TETRIS
-- INVADERS
+- PUZZLE <img width="942" height="471" alt="chip8-puzzle" src="https://github.com/user-attachments/assets/13fe05c2-22fc-4af4-ad3e-4c5450d7c63a" />
+
+- BLITZ <img width="946" height="476" alt="chip8-blitz" src="https://github.com/user-attachments/assets/9372ccc7-78c9-479f-a6eb-0085d15ec93a" />
+
+- BRIX <img width="956" height="484" alt="chip8-brix" src="https://github.com/user-attachments/assets/4ac50d5e-f512-479e-87a0-53853540469e" />
+
+- PONG <img width="952" height="467" alt="chip8-pong" src="https://github.com/user-attachments/assets/576db20a-6c5b-4366-a53d-b6866b261969" />
+
+- TETRIS <img width="941" height="480" alt="chip8-tetris" src="https://github.com/user-attachments/assets/b3329aac-2829-408e-8d45-d9544119455f" />
+- INVADERS <img width="959" height="481" alt="chip8-invaders" src="https://github.com/user-attachments/assets/2fe12267-6e60-4020-be17-18865ccbd552" />
 
 The rest of these can be found in the `test_games/c8games/` directory. Just type 
 in whichever you wish to play.
